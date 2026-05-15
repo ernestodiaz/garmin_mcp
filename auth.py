@@ -13,6 +13,7 @@ Usage:
 import os
 import sys
 import time
+import pickle
 import warnings
 from pathlib import Path
 
@@ -24,6 +25,8 @@ from garminconnect import Garmin
 load_dotenv()
 
 TOKENSTORE = Path(os.getenv("GARMIN_TOKENSTORE", str(Path.home() / ".garth")))
+_PICKLE = TOKENSTORE / "garmin_session.pkl"
+
 email = os.getenv("GARMIN_EMAIL") or input("Garmin email: ")
 password = os.getenv("GARMIN_PASSWORD") or input("Garmin password: ")
 
@@ -35,14 +38,22 @@ def prompt_mfa() -> str:
     return input("Enter MFA/2FA code from your authenticator app: ").strip()
 
 
+def save_session(api: Garmin) -> None:
+    TOKENSTORE.mkdir(parents=True, exist_ok=True)
+    if hasattr(api, "garth"):
+        api.garth.dump(str(TOKENSTORE))
+        print(f"Tokens cached at: {TOKENSTORE}")
+    else:
+        _PICKLE.write_bytes(pickle.dumps(api))
+        print(f"Session cached at: {_PICKLE}")
+
+
 def attempt_login(n: int) -> None:
     print(f"Attempt {n}/{MAX_ATTEMPTS}: connecting to Garmin...")
     api = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
     api.login()
-    TOKENSTORE.mkdir(parents=True, exist_ok=True)
-    api.garth.dump(str(TOKENSTORE))
-    print(f"\nLogged in as: {api.get_full_name()}")
-    print(f"Tokens cached at: {TOKENSTORE}")
+    save_session(api)
+    print(f"Logged in as: {api.get_full_name()}")
     print("The MCP server will now authenticate automatically.")
 
 
