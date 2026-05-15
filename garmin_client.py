@@ -1,8 +1,9 @@
 import os
 import logging
-import pickle
 import warnings
 from pathlib import Path
+
+import dill as pickle
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 

@@ -13,9 +13,10 @@ Usage:
 import os
 import sys
 import time
-import pickle
 import warnings
 from pathlib import Path
+
+import dill as pickle
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -52,10 +53,6 @@ def attempt_login(n: int) -> None:
     print(f"Attempt {n}/{MAX_ATTEMPTS}: connecting to Garmin...")
     api = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
     api.login()
-    print("\n--- DEBUG: Garmin object attributes ---")
-    for k, v in vars(api).items():
-        print(f"  {k}: {type(v).__name__}")
-    print("--- END DEBUG ---\n")
     save_session(api)
     print(f"Logged in as: {api.get_full_name()}")
     print("The MCP server will now authenticate automatically.")
