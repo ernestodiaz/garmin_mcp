@@ -3,8 +3,6 @@ import logging
 import warnings
 from pathlib import Path
 
-import dill as pickle
-
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from garminconnect import Garmin
@@ -15,30 +13,6 @@ logger = logging.getLogger(__name__)
 
 _client: Garmin | None = None
 TOKENSTORE = Path(os.getenv("GARMIN_TOKENSTORE", str(Path.home() / ".garth")))
-_PICKLE = TOKENSTORE / "garmin_session.pkl"
-
-
-def _save_session(api: Garmin) -> None:
-    TOKENSTORE.mkdir(parents=True, exist_ok=True)
-    if hasattr(api, "garth"):
-        api.garth.dump(str(TOKENSTORE))
-        logger.info("Tokens saved via garth to %s", TOKENSTORE)
-    else:
-        _PICKLE.write_bytes(pickle.dumps(api))
-        logger.info("Session saved via pickle to %s", _PICKLE)
-
-
-def _load_session() -> Garmin | None:
-    """Try to restore a previously authenticated session."""
-    if _PICKLE.exists():
-        try:
-            api = pickle.loads(_PICKLE.read_bytes())
-            api.get_full_name()  # quick liveness check
-            logger.info("Session restored from pickle at %s", _PICKLE)
-            return api
-        except Exception as e:
-            logger.info("Pickle session invalid (%s), will re-authenticate", e)
-    return None
 
 
 def get_client() -> Garmin:
@@ -46,14 +20,9 @@ def get_client() -> Garmin:
     if _client is not None:
         return _client
 
-    # Try pickle first (works with newer garminconnect that dropped garth)
-    api = _load_session()
-    if api:
-        _client = api
-        return _client
-
     email = os.getenv("GARMIN_EMAIL")
     password = os.getenv("GARMIN_PASSWORD")
+
     if not email or not password:
         raise RuntimeError(
             "GARMIN_EMAIL and GARMIN_PASSWORD must be set. "
@@ -67,20 +36,13 @@ def get_client() -> Garmin:
         )
 
     api = Garmin(email=email, password=password, prompt_mfa=_no_mfa)
+    # login(tokenstore) loads cached tokens if present; falls back to fresh
+    # credential login and auto-saves tokens on success.
+    api.login(str(TOKENSTORE))
+    logger.info("Authenticated as %s", api.full_name)
 
-    # Try garth-style tokenstore (older garminconnect)
-    try:
-        api.login(str(TOKENSTORE))
-        logger.info("Logged in via garth tokenstore at %s", TOKENSTORE)
-        _client = api
-        return _client
-    except Exception:
-        pass
-
-    logger.info("No cached session found. Run `uv run python auth.py` to authenticate.")
-    raise RuntimeError(
-        "No cached session found. Run `uv run python auth.py` first."
-    )
+    _client = api
+    return _client
 
 
 def reset_client() -> None:
