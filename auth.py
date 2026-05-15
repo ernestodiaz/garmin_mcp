@@ -1,50 +1,49 @@
 #!/usr/bin/env python3
 """
-Run once interactively to authenticate and cache OAuth tokens.
-After this, the MCP server uses cached tokens automatically.
+Run once to authenticate and cache OAuth tokens.
+After this the MCP server authenticates automatically.
+
+If you get a 429 error, Garmin is rate limiting your IP.
+Wait 15-30 minutes (or connect via a different network / VPN) then retry.
 
 Usage:
     uv run python auth.py
-
-If you get a 429 error, Garmin is rate limiting logins from your IP.
-Wait 15-30 minutes, or try from a different network / VPN, then retry.
 """
 
 import os
 import sys
 import time
+import warnings
 from pathlib import Path
 
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 from dotenv import load_dotenv
+from garminconnect import Garmin
 
 load_dotenv()
 
 TOKENSTORE = Path(os.getenv("GARMIN_TOKENSTORE", str(Path.home() / ".garth")))
-
 email = os.getenv("GARMIN_EMAIL") or input("Garmin email: ")
 password = os.getenv("GARMIN_PASSWORD") or input("Garmin password: ")
 
 MAX_ATTEMPTS = 3
-RETRY_DELAYS = [30, 60]  # seconds between attempts
+RETRY_DELAYS = [30, 60]
 
 
-def attempt_login(attempt: int) -> None:
-    print(f"\nAttempt {attempt}/{MAX_ATTEMPTS}: logging in to Garmin Connect...")
-    try:
-        import garth
-        garth.login(email, password)
-        TOKENSTORE.mkdir(parents=True, exist_ok=True)
-        garth.save(str(TOKENSTORE))
-    except Exception as e:
-        raise RuntimeError(str(e)) from e
+def prompt_mfa() -> str:
+    return input("Enter MFA/2FA code from your authenticator app: ").strip()
 
-    print("Verifying tokens...")
-    from garminconnect import Garmin
-    api = Garmin()
-    api.login(str(TOKENSTORE))
-    print(f"\nSuccess! Logged in as: {api.get_full_name()}")
+
+def attempt_login(n: int) -> None:
+    print(f"Attempt {n}/{MAX_ATTEMPTS}: connecting to Garmin...")
+    api = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
+    api.login()
+    TOKENSTORE.mkdir(parents=True, exist_ok=True)
+    api.garth.dump(str(TOKENSTORE))
+    print(f"\nLogged in as: {api.get_full_name()}")
     print(f"Tokens cached at: {TOKENSTORE}")
-    print("\nThe MCP server will now authenticate automatically.")
+    print("The MCP server will now authenticate automatically.")
 
 
 for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -53,22 +52,21 @@ for attempt in range(1, MAX_ATTEMPTS + 1):
         sys.exit(0)
     except Exception as e:
         msg = str(e)
-        is_rate_limited = "429" in msg
-
-        if not is_rate_limited or attempt == MAX_ATTEMPTS:
-            if is_rate_limited:
-                print(
-                    "\nGarmin is rate limiting logins from this IP address.\n"
-                    "This is enforced server-side — the code is correct.\n\n"
-                    "To fix:\n"
-                    "  1. Wait 15-30 minutes and run auth.py again\n"
-                    "  2. Connect via VPN and run auth.py again\n"
-                    "  3. Try from a different network (mobile hotspot, etc.)"
-                )
+        if "429" in msg:
+            if attempt < MAX_ATTEMPTS:
+                wait = RETRY_DELAYS[attempt - 1]
+                print(f"Rate limited (429). Waiting {wait}s before retry...")
+                time.sleep(wait)
             else:
-                print(f"\nLogin failed: {msg}")
+                print(
+                    "\nGarmin is rate limiting logins from this IP (429).\n\n"
+                    "This is enforced server-side — the code is correct.\n\n"
+                    "Fix options:\n"
+                    "  1. Wait 15-30 minutes, then run:  uv run python auth.py\n"
+                    "  2. Switch to a mobile hotspot and retry\n"
+                    "  3. Connect via VPN and retry"
+                )
+                sys.exit(1)
+        else:
+            print(f"Login failed: {msg}")
             sys.exit(1)
-
-        wait = RETRY_DELAYS[attempt - 1]
-        print(f"Rate limited (429). Waiting {wait}s before retry...")
-        time.sleep(wait)

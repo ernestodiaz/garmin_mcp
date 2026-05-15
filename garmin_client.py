@@ -1,6 +1,9 @@
 import os
 import logging
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from garminconnect import Garmin
 from dotenv import load_dotenv
@@ -26,7 +29,13 @@ def get_client() -> Garmin:
             "Copy .env.example to .env, fill in credentials, then run `python auth.py` once."
         )
 
-    api = Garmin(email=email, password=password)
+    def _no_mfa() -> str:
+        raise RuntimeError(
+            "MFA is required but cached tokens are missing or expired. "
+            "Run `uv run python auth.py` to re-authenticate interactively."
+        )
+
+    api = Garmin(email=email, password=password, prompt_mfa=_no_mfa)
 
     try:
         api.login(str(TOKENSTORE))
